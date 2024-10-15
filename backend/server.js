@@ -1,4 +1,5 @@
 import express from "express";
+import mysql from "mysql";
 import cors from "cors";
 import nodemailer from "nodemailer";
 import bcrypt from "bcryptjs";
@@ -100,7 +101,7 @@ app.post("/register", async (req, res) => {
   const { email, name, affiliation, password } = req.body;
 
   // 입력된 정보가 유효한지 확인
-  if (!email || !name || !affiliation || !password) {
+  if (!email || !name || !countryCode || !phone || !affiliation || !password) {
     return res.status(400).json("모든 필드값 필수!!!");
   }
 
@@ -111,10 +112,17 @@ app.post("/register", async (req, res) => {
 
     // 유저 정보 삽입 쿼리
     // const q =
-    //   "INSERT INTO usertb (email, name, affiliation, password) VALUES (?)";
-    // const values = [email, name, affiliation, hashedPassword];
+    //   "INSERT INTO usertb (email, name, country_code, phone, affiliation, password) VALUES (?)";
+    // const values = [
+    //   email,
+    //   name,
+    //   countryCode,
+    //   phone,
+    //   affiliation,
+    //   hashedPassword,
+    // ];
 
-    // // MySQL에 유저 데이터 저장
+    // MySQL에 유저 데이터 저장
     // db.query(q, [values], (err, data) => {
     //   if (err) {
     //     if (err.code === "ER_DUP_ENTRY") {
@@ -126,6 +134,99 @@ app.post("/register", async (req, res) => {
     // });
   } catch (error) {
     return res.status(500).json("사용자 등록 오류");
+  }
+});
+
+// 계정 찾기
+
+// 전화번호와 국가 코드로 이메일(ID) 및 이름 찾기 API
+app.post("/find-id", (req, res) => {
+  const { phone, countryCode } = req.body;
+
+  if (!phone || !countryCode) {
+    return res.status(400).json("전화번호와 국가 코드가 필요합니다.");
+  }
+
+  // 이름과 이메일을 함께 가져옴
+  const query = `SELECT name, email FROM usertb WHERE phone = ? AND country_code = ?`;
+
+  db.query(query, [phone, countryCode], (err, data) => {
+    if (err) return res.status(500).json("서버 오류가 발생했습니다.");
+
+    if (data.length > 0) {
+      return res.status(200).json({ name: data[0].name, email: data[0].email });
+    } else {
+      return res.status(404).json("해당 전화번호로 가입된 이메일이 없습니다.");
+    }
+  });
+});
+
+// 비밀번호 재설정 링크 전송 API
+app.post("/send-reset-link", (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    console.error("이메일이 제공되지 않았습니다.");
+    return res.status(400).json("이메일이 필요합니다.");
+  }
+
+  // 데이터베이스에서 이메일로 사용자 조회
+  const query = "SELECT user_id FROM usertb WHERE email = ?";
+  db.query(query, [email], (err, data) => {
+    if (err) {
+      console.error("데이터베이스 오류:", err); // 데이터베이스 오류 출력
+      return res.status(500).json("서버 오류가 발생했습니다.");
+    }
+
+    if (data.length === 0) {
+      return res.status(400).json("해당 이메일로 가입된 정보가 없습니다.");
+    }
+
+    const userId = data[0].user_id; // user_id 필드를 가져옴
+    const resetLink = `http://localhost:3000/#/reset-password/${userId}`; // 비밀번호 재설정 링크
+
+    // 이메일 전송 설정
+    const mailOptions = {
+      from: "your-email@example.com",
+      to: email,
+      subject: "비밀번호 재설정 링크",
+      text: `비밀번호를 재설정하려면 다음 링크를 클릭하세요: ${resetLink}`,
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error("이메일 전송 실패:", error);
+        return res.status(500).json("이메일 전송 실패");
+      }
+
+      console.log("비밀번호 재설정 링크 전송 완료");
+      res.status(200).json("비밀번호 재설정 링크가 이메일로 전송되었습니다.");
+    });
+  });
+});
+
+// 비밀번호 재설정 API
+app.post("/reset-password", async (req, res) => {
+  const { password, userId } = req.body;
+
+  if (!password || !userId) {
+    return res.status(400).json("비밀번호와 사용자 ID가 필요합니다.");
+  }
+
+  try {
+    // 비밀번호 암호화 처리
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // 비밀번호 업데이트 쿼리
+    const query = "UPDATE usertb SET password = ? WHERE user_id = ?";
+    db.query(query, [hashedPassword, userId], (err, result) => {
+      if (err) return res.status(500).json(err);
+
+      return res.status(200).json("비밀번호가 성공적으로 재설정되었습니다.");
+    });
+  } catch (error) {
+    return res.status(500).json("서버 오류가 발생했습니다.");
   }
 });
 
